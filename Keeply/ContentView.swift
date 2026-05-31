@@ -54,6 +54,13 @@ struct ContentView: View {
                 saveNote(presentation.note, title: title, content: content)
             }
         }
+        .overlay(alignment: .bottom) {
+            if selectedSection == .quickCopy, copiedSnippetID != nil {
+                CopyToast()
+                    .padding(.bottom, 104)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 
     @ViewBuilder
@@ -85,8 +92,9 @@ struct ContentView: View {
         withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
             snippets.insert(
                 CopySnippet(
-                    label: label,
-                    value: value.isEmpty ? label : value,
+                    title: label,
+                    category: "Quick Copy",
+                    content: value.isEmpty ? label : value,
                     icon: "doc.on.doc",
                     tint: .purple
                 ),
@@ -132,7 +140,7 @@ struct ContentView: View {
     }
 
     private func copy(_ snippet: CopySnippet) {
-        UIPasteboard.general.string = snippet.value
+        UIPasteboard.general.string = snippet.content
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) {
             copiedSnippetID = snippet.id
@@ -233,19 +241,69 @@ private struct SegmentedControl: View {
 
 private struct NotesView: View {
     let notes: [PocketNote]
+    let onOpen: (PocketNote) -> Void
+    let onEdit: (PocketNote) -> Void
+    let onDelete: (PocketNote) -> Void
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "RECENT NOTES", count: notes.count)
+        List {
+            SectionTitle(title: "RECENT NOTES", count: notes.count)
+                .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 8, trailing: 22))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
 
+            if notes.isEmpty {
+                EmptyNotesView()
+                    .listRowInsets(EdgeInsets(top: 30, leading: 20, bottom: 0, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else {
                 ForEach(notes) { note in
-                    NoteCard(note: note)
+                    Button {
+                        onOpen(note)
+                    } label: {
+                        NoteCard(note: note)
+                    }
+                    .buttonStyle(PressableCardButtonStyle())
+                    .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            onDelete(note)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+
+                        Button {
+                            onEdit(note)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(AppColor.accent)
+                    }
+                    .contextMenu {
+                        Button {
+                            onEdit(note)
+                        } label: {
+                            Label("Edit Note", systemImage: "pencil")
+                        }
+
+                        Button(role: .destructive) {
+                            onDelete(note)
+                        } label: {
+                            Label("Delete Note", systemImage: "trash")
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 106)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .scrollIndicators(.hidden)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .contentMargins(.bottom, 106, for: .scrollContent)
+        .background(Color.clear)
     }
 }
 
@@ -270,7 +328,7 @@ private struct NoteCard: View {
                         .foregroundStyle(AppColor.secondaryText.opacity(0.78))
                 }
 
-                Text(note.preview)
+                Text(note.content)
                     .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(AppColor.secondaryText)
                     .lineLimit(2)
@@ -287,6 +345,28 @@ private struct NoteCard: View {
     }
 }
 
+private struct EmptyNotesView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "note.text")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(AppColor.accent)
+                .frame(width: 52, height: 52)
+                .background(AppColor.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Text("A quiet place for your notes.")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(AppColor.primaryText)
+
+            Text("Tap + to capture a thought or reminder.")
+                .font(.system(size: 13))
+                .foregroundStyle(AppColor.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+    }
+}
+
 private struct QuickCopyView: View {
     let snippets: [CopySnippet]
     let copiedSnippetID: UUID?
@@ -294,8 +374,15 @@ private struct QuickCopyView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "SAVED CLIPS", count: snippets.count)
+            LazyVStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
+                    SectionTitle(title: "QUICK ACCESS", count: snippets.count)
+
+                    Text("Tap any card to copy instantly.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+                .padding(.bottom, 3)
 
                 ForEach(snippets) { snippet in
                     CopyCard(
@@ -318,29 +405,41 @@ private struct CopyCard: View {
 
     var body: some View {
         Button(action: onCopy) {
-            HStack(spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
                 SurfaceIcon(symbol: snippet.icon, tint: snippet.tint)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(snippet.label)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(snippet.title)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(AppColor.primaryText)
                         .lineLimit(1)
 
-                    Text(snippet.value)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(AppColor.secondaryText)
+                    Text(snippet.category.uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(snippet.tint.color.opacity(0.92))
                         .lineLimit(1)
+
+                    Text(snippet.content)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(AppColor.secondaryText)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
 
                 Spacer(minLength: 8)
 
-                Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
-                    .contentTransition(.symbolEffect(.replace))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isCopied ? AppColor.accent : AppColor.secondaryText)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(isCopied ? 0.07 : 0.035), in: Circle())
+                HStack(spacing: 5) {
+                    Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                        .contentTransition(.symbolEffect(.replace))
+
+                    Text(isCopied ? "Copied" : "Copy")
+                }
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(isCopied ? AppColor.accent : AppColor.primaryText)
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(isCopied ? AppColor.accent.opacity(0.12) : Color.white.opacity(0.055), in: Capsule())
             }
             .padding(14)
             .background(AppColor.cardSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -351,6 +450,27 @@ private struct CopyCard: View {
             .shadow(color: Color.black.opacity(0.16), radius: 14, y: 8)
         }
         .buttonStyle(PressableCardButtonStyle())
+    }
+}
+
+private struct CopyToast: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(AppColor.accent)
+
+            Text("Copied")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppColor.primaryText)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 40)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.3), radius: 12, y: 6)
     }
 }
 
@@ -420,6 +540,110 @@ private struct AddButton: View {
         }
         .buttonStyle(FloatingButtonStyle())
         .accessibilityLabel("Add \(section.title)")
+    }
+}
+
+private struct NoteEditorView: View {
+    let note: PocketNote?
+    let onSave: (String, String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title: String
+    @State private var content: String
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case title
+        case content
+    }
+
+    init(note: PocketNote?, onSave: @escaping (String, String) -> Void) {
+        self.note = note
+        self.onSave = onSave
+        _title = State(initialValue: note?.title ?? "")
+        _content = State(initialValue: note?.content ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppColor.background
+                    .ignoresSafeArea()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 14) {
+                            SurfaceIcon(symbol: note?.icon ?? "note.text", tint: note?.tint ?? .purple)
+
+                            TextField("Note title", text: $title, axis: .vertical)
+                                .focused($focusedField, equals: .title)
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundStyle(AppColor.primaryText)
+                                .lineLimit(2)
+                        }
+
+                        Rectangle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 1)
+                            .padding(.vertical, 20)
+
+                        ZStack(alignment: .topLeading) {
+                            if content.isEmpty {
+                                Text("Start writing...")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(AppColor.secondaryText.opacity(0.72))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 8)
+                                    .allowsHitTesting(false)
+                            }
+
+                            TextEditor(text: $content)
+                                .focused($focusedField, equals: .content)
+                                .font(.system(size: 17))
+                                .foregroundStyle(AppColor.primaryText)
+                                .lineSpacing(5)
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 460)
+                                .padding(.horizontal, -5)
+                        }
+                    }
+                    .padding(20)
+                }
+            }
+            .navigationTitle(note == nil ? "New Note" : "Edit Note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(AppColor.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        save()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .tint(AppColor.accent)
+        }
+        .preferredColorScheme(.dark)
+        .onAppear {
+            if note == nil {
+                focusedField = .title
+            }
+        }
+    }
+
+    private func save() {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return }
+        onSave(cleanTitle, content.trimmingCharacters(in: .whitespacesAndNewlines))
+        dismiss()
     }
 }
 
@@ -567,41 +791,69 @@ private enum PocketSection: String, CaseIterable, Identifiable {
     }
 }
 
-private struct PocketNote: Identifiable {
+private struct NoteEditorPresentation: Identifiable {
     let id = UUID()
+    let note: PocketNote?
+}
+
+private struct PocketNote: Identifiable {
+    let id: UUID
     let title: String
-    let preview: String
+    let content: String
     let modified: String
     let icon: String
     let tint: NoteTint
 
+    init(
+        id: UUID = UUID(),
+        title: String,
+        content: String,
+        modified: String,
+        icon: String,
+        tint: NoteTint
+    ) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.modified = modified
+        self.icon = icon
+        self.tint = tint
+    }
+
     static let samples = [
         PocketNote(
-            title: "Weekend ideas",
-            preview: "Book a quiet table, pick up coffee beans, and finally visit the gallery.",
-            modified: "12m",
-            icon: "sun.max",
-            tint: .amber
-        ),
-        PocketNote(
-            title: "Books to find",
-            preview: "The Creative Act, Tomorrow and Tomorrow and Tomorrow, The Design of Everyday Things.",
-            modified: "1h",
-            icon: "book.closed",
-            tint: .blue
-        ),
-        PocketNote(
-            title: "Apartment checklist",
-            preview: "Measure the office wall. Replace the entryway bulb. Order a small rug.",
-            modified: "Tue",
-            icon: "checkmark.circle",
+            title: "Tomorrow Tasks",
+            content: "• Call bank\n• Finish report\n• Buy milk",
+            modified: "Today",
+            icon: "checklist",
             tint: .purple
         ),
         PocketNote(
-            title: "Gift notes",
-            preview: "A few small ideas for birthdays coming up this month.",
-            modified: "Fri",
-            icon: "gift",
+            title: "Grocery List",
+            content: "• Oat milk\n• Fresh basil\n• Coffee beans",
+            modified: "Today",
+            icon: "cart",
+            tint: .amber
+        ),
+        PocketNote(
+            title: "Meeting Notes",
+            content: "Review the launch timeline and send the revised brief before Thursday.",
+            modified: "Yesterday",
+            icon: "person.2",
+            tint: .blue
+        ),
+        PocketNote(
+            title: "Ideas",
+            content: "A quiet reading mode with fewer controls and a warmer background.",
+            modified: "Sat",
+            icon: "lightbulb",
+            tint: .purple
+        ),
+        PocketNote(
+            title: "Books to Read",
+            content: "The Creative Act\nThe Design of Everyday Things\nTomorrow, and Tomorrow, and Tomorrow",
+            modified: "May 24",
+            icon: "book.closed",
             tint: .rose
         )
     ]
@@ -609,41 +861,54 @@ private struct PocketNote: Identifiable {
 
 private struct CopySnippet: Identifiable {
     let id = UUID()
-    let label: String
-    let value: String
+    let title: String
+    let category: String
+    let content: String
     let icon: String
     let tint: NoteTint
 
     static let samples = [
         CopySnippet(
-            label: "Personal email",
-            value: "hello@alexmorgan.design",
-            icon: "envelope",
+            title: "Personal Bank",
+            category: "Commercial Bank",
+            content: "1234567890",
+            icon: "building.columns",
             tint: .purple
         ),
         CopySnippet(
-            label: "Home address",
-            value: "48 Juniper Lane, Portland, OR",
-            icon: "house",
+            title: "Email Signature",
+            category: "Work",
+            content: "Alex Morgan\nProduct Designer",
+            icon: "signature",
             tint: .blue
         ),
         CopySnippet(
-            label: "Portfolio",
-            value: "alexmorgan.design",
-            icon: "link",
+            title: "Company Address",
+            category: "Work",
+            content: "48 Juniper Lane\nPortland, OR 97205",
+            icon: "building.2",
             tint: .amber
         ),
         CopySnippet(
-            label: "Wi-Fi password",
-            value: "SundayCoffee27",
-            icon: "wifi",
+            title: "Tax Number",
+            category: "Finance",
+            content: "US-TAX-84-2910473",
+            icon: "number",
             tint: .rose
         ),
         CopySnippet(
-            label: "Phone number",
-            value: "+1 (503) 555-0148",
-            icon: "phone",
+            title: "GitHub Username",
+            category: "Developer",
+            content: "@alexmorgan",
+            icon: "chevron.left.forwardslash.chevron.right",
             tint: .blue
+        ),
+        CopySnippet(
+            title: "Rewrite Prompt",
+            category: "Prompt Template",
+            content: "Rewrite this with a clear, concise tone.",
+            icon: "text.quote",
+            tint: .purple
         )
     ]
 }
