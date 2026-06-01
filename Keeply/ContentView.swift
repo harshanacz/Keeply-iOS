@@ -66,8 +66,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch selectedSection {
-        case .notes:
+        ZStack {
             NotesView(
                 selectedSection: $selectedSection,
                 notes: orderedNotes,
@@ -76,8 +75,10 @@ struct ContentView: View {
                 onToggleFavorite: toggleFavorite,
                 onDelete: deleteNote
             )
-                .transition(.opacity)
-        case .quickCopy:
+            .opacity(selectedSection == .notes ? 1 : 0)
+            .allowsHitTesting(selectedSection == .notes)
+            .accessibilityHidden(selectedSection != .notes)
+
             QuickCopyView(
                 selectedSection: $selectedSection,
                 snippets: snippets,
@@ -86,8 +87,11 @@ struct ContentView: View {
                 onEdit: openSnippet,
                 onDelete: deleteSnippet
             )
-            .transition(.opacity)
+            .opacity(selectedSection == .quickCopy ? 1 : 0)
+            .allowsHitTesting(selectedSection == .quickCopy)
+            .accessibilityHidden(selectedSection != .quickCopy)
         }
+        .animation(.easeInOut(duration: 0.18), value: selectedSection)
     }
 
     private func saveItem(
