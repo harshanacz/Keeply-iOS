@@ -10,8 +10,8 @@ import UIKit
 
 struct ContentView: View {
     @State private var selectedSection: PocketSection = .notes
-    @State private var notes = PocketNote.samples
-    @State private var snippets = CopySnippet.samples
+    @State private var notes = PocketStorage.loadNotes()
+    @State private var snippets = PocketStorage.loadSnippets()
     @State private var editor: EditorPresentation?
     @State private var viewer: NoteViewerPresentation?
     @State private var copiedSnippetID: UUID?
@@ -21,14 +21,7 @@ struct ContentView: View {
             AppColor.background
                 .ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 0) {
-                HeaderView(selectedSection: $selectedSection)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 22)
-
-                content
-                    .padding(.top, 26)
-            }
+            content
 
             AddButton(section: selectedSection) {
                 editor = EditorPresentation(section: selectedSection)
@@ -63,6 +56,12 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .onChange(of: notes) { _, notes in
+            PocketStorage.saveNotes(notes)
+        }
+        .onChange(of: snippets) { _, snippets in
+            PocketStorage.saveSnippets(snippets)
+        }
     }
 
     @ViewBuilder
@@ -70,6 +69,7 @@ struct ContentView: View {
         switch selectedSection {
         case .notes:
             NotesView(
+                selectedSection: $selectedSection,
                 notes: orderedNotes,
                 onOpen: openNote,
                 onEdit: editNote,
@@ -79,6 +79,7 @@ struct ContentView: View {
                 .transition(.opacity)
         case .quickCopy:
             QuickCopyView(
+                selectedSection: $selectedSection,
                 snippets: snippets,
                 copiedSnippetID: copiedSnippetID,
                 onCopy: copy,
@@ -267,7 +268,7 @@ private struct HeaderView: View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Pocket")
+                    Text("Keeply")
                         .font(.system(size: 39, weight: .bold, design: .rounded))
                         .tracking(-1.2)
                         .foregroundStyle(AppColor.primaryText)
@@ -300,6 +301,7 @@ private struct SegmentedControl: View {
                         .foregroundStyle(selectedSection == section ? AppColor.primaryText : AppColor.secondaryText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 43)
+                        .contentShape(Rectangle())
                         .background {
                             if selectedSection == section {
                                 ZStack(alignment: .bottom) {
@@ -332,6 +334,7 @@ private struct SegmentedControl: View {
 }
 
 private struct NotesView: View {
+    @Binding var selectedSection: PocketSection
     let notes: [PocketNote]
     let onOpen: (PocketNote) -> Void
     let onEdit: (PocketNote) -> Void
@@ -340,6 +343,11 @@ private struct NotesView: View {
 
     var body: some View {
         List {
+            HeaderView(selectedSection: $selectedSection)
+                .listRowInsets(EdgeInsets(top: 22, leading: 20, bottom: 26, trailing: 20))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
             SectionTitle(title: "RECENT NOTES")
                 .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 8, trailing: 22))
                 .listRowBackground(Color.clear)
@@ -483,6 +491,7 @@ private struct EmptyNotesView: View {
 }
 
 private struct QuickCopyView: View {
+    @Binding var selectedSection: PocketSection
     let snippets: [CopySnippet]
     let copiedSnippetID: UUID?
     let onCopy: (CopySnippet) -> Void
@@ -491,7 +500,10 @@ private struct QuickCopyView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            LazyVStack(alignment: .leading, spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                HeaderView(selectedSection: $selectedSection)
+                    .padding(.bottom, 26)
+
                 VStack(alignment: .leading, spacing: 7) {
                     SectionTitle(title: "QUICK ACCESS")
 
@@ -501,17 +513,21 @@ private struct QuickCopyView: View {
                 }
                 .padding(.bottom, 3)
 
-                ForEach(snippets) { snippet in
-                    CopyCard(
-                        snippet: snippet,
-                        isCopied: copiedSnippetID == snippet.id,
-                        onCopy: { onCopy(snippet) },
-                        onEdit: { onEdit(snippet) },
-                        onDelete: { onDelete(snippet) }
-                    )
+                LazyVStack(spacing: 10) {
+                    ForEach(snippets) { snippet in
+                        CopyCard(
+                            snippet: snippet,
+                            isCopied: copiedSnippetID == snippet.id,
+                            onCopy: { onCopy(snippet) },
+                            onEdit: { onEdit(snippet) },
+                            onDelete: { onDelete(snippet) }
+                        )
+                    }
                 }
+                .padding(.top, 10)
             }
             .padding(.horizontal, 20)
+            .padding(.top, 22)
             .padding(.bottom, 106)
         }
     }
@@ -1382,6 +1398,7 @@ private struct NoteFormatPicker: View {
                         .foregroundStyle(selection == format ? AppColor.primaryText : AppColor.secondaryText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 42)
+                        .contentShape(Rectangle())
                         .background {
                             if selection == format {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1559,7 +1576,7 @@ private struct ItemEditorDraft {
     let iconOption: SnippetIconOption?
 }
 
-private enum NoteFormat: String, CaseIterable, Identifiable {
+private enum NoteFormat: String, CaseIterable, Identifiable, Codable {
     case text
     case checklist
 
@@ -1580,7 +1597,7 @@ private enum NoteFormat: String, CaseIterable, Identifiable {
     }
 }
 
-private struct ChecklistItem: Identifiable {
+private struct ChecklistItem: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
     var isChecked: Bool
@@ -1660,7 +1677,7 @@ private struct EditorPresentation: Identifiable {
     }
 }
 
-private struct PocketNote: Identifiable {
+private struct PocketNote: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
     var content: String
@@ -1754,7 +1771,7 @@ private struct PocketNote: Identifiable {
     ]
 }
 
-private struct CopySnippet: Identifiable {
+private struct CopySnippet: Identifiable, Codable, Equatable {
     let id: UUID
     let title: String
     let category: String
@@ -1885,7 +1902,7 @@ private enum SnippetIconOption: String, CaseIterable, Identifiable {
     }
 }
 
-private enum NoteTint {
+private enum NoteTint: String, Codable {
     case purple
     case blue
     case amber
@@ -1898,6 +1915,39 @@ private enum NoteTint {
         case .amber: Color(hex: 0xC79B63)
         case .rose: Color(hex: 0xB9828D)
         }
+    }
+}
+
+private enum PocketStorage {
+    private static let notesKey = "keeply.notes"
+    private static let snippetsKey = "keeply.snippets"
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
+    static func loadNotes() -> [PocketNote] {
+        load([PocketNote].self, forKey: notesKey) ?? PocketNote.samples
+    }
+
+    static func saveNotes(_ notes: [PocketNote]) {
+        save(notes, forKey: notesKey)
+    }
+
+    static func loadSnippets() -> [CopySnippet] {
+        load([CopySnippet].self, forKey: snippetsKey) ?? CopySnippet.samples
+    }
+
+    static func saveSnippets(_ snippets: [CopySnippet]) {
+        save(snippets, forKey: snippetsKey)
+    }
+
+    private static func load<Value: Decodable>(_ type: Value.Type, forKey key: String) -> Value? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? decoder.decode(type, from: data)
+    }
+
+    private static func save<Value: Encodable>(_ value: Value, forKey key: String) {
+        guard let data = try? encoder.encode(value) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 }
 
